@@ -4,7 +4,10 @@ local multiply_time = settings.startup["global-multiplier-affects-time"].value
 local ignore_barrels = settings.startup["global-multiplier-ignores-barrels"].value
 local mult_energy = settings.startup["global-multiplier-mult-energy"].value
 local all_items = data.raw["item"]
+local all_modules = data.raw["module"]
 local all_fluids = data.raw["fluid"]
+local all_tools = data.raw["tool"]
+local all_ammo = data.raw["ammo"]
 local afeccts_categories = { "assembling-machine", "furnace", "lab", "agricultural-tower",
     "mining-drill", "radar" }
 
@@ -38,6 +41,45 @@ local function clamp(value, min, max)
     else
         return value
     end
+end
+
+local function log_recipe_details(recipe, recipe_name)
+    log("==== RECIPE: " .. recipe_name .. " ====")    
+    -- Log basic properties
+    log("  name: " .. (recipe_name or "nil"))
+    log("  category: " .. (recipe.category or "nil"))
+    log("  energy_required: " .. (recipe.energy_required or "nil"))
+    
+    -- Log if it uses 'result' format
+    if recipe.result then
+        log("  result: " .. recipe.result)
+        log("  result_count: " .. (recipe.result_count or 1))
+    end
+    
+    -- Log if it uses 'results' format
+    if recipe.results then
+        log("  results table:")
+        for i, result in ipairs(recipe.results) do
+            local result_info = "    [" .. i .. "] "
+            if result.name then
+                result_info = result_info .. "name: " .. result.name
+                result_info = result_info .. ", type: " .. (result.type or "nil")
+                result_info = result_info .. ", amount: " .. (result.amount or "nil")
+                if result.amount_min then
+                    result_info = result_info .. ", amount_min: " .. result.amount_min
+                end
+                if result.amount_max then
+                    result_info = result_info .. ", amount_max: " .. result.amount_max
+                end
+            else
+                -- Handle simplified format like {["copper-plate"] = 2}
+                result_info = result_info .. "simplified format"
+            end
+            log(result_info)
+        end
+    end
+    
+    log("==== END RECIPE: " .. recipe_name .. " ====")
 end
 
 ------------------------------------------------------------------------------
@@ -116,6 +158,7 @@ end
 
 -- For all recipes multiply the products
 for _, v in pairs(data.raw.recipe) do
+    log("Recipe : " .. v.name)
     -- Multiply the manufacturing time of a recipe
     if multiply_time and v.energy_required then
         v.energy_required = v.energy_required * mult
@@ -124,16 +167,31 @@ for _, v in pairs(data.raw.recipe) do
         v.energy_required = 0.5 * mult
     end
 
+    -- Skip barrel recipes if ignore_barrels is enabled
     if ignore_barrels and v.name:match("%-barrel$") then
-        return
+        goto continue  -- Skip to next recipe
+        log("Skipped recipe : " .. v.name)
     end
 
+    if v.name == "speed-module" then
+        log_recipe_details(v, v.name)
+    end
+    -- Handle recipes with 'results' table (multiple products)
     if v.results then
         for _, results in ipairs(v.results) do
             if results.type == "item" then
                 local item = all_items[results.name]
+                local module_prot = all_modules[results.name]
+                local tool_prot = all_tools[results.name]
+                local ammo_prot = all_ammo[results.name]
                 if item and flagscheck(item.flags) then
                     results.amount = amoutcheck(results.amount, results.amount_max, results.amount_min, item, v.name)
+                elseif module_prot and flagscheck(module_prot.flags) then
+                    results.amount = amoutcheck(results.amount, results.amount_max, results.amount_min, module_prot, v.name)
+                elseif tool_prot and flagscheck(tool_prot.flags) then
+                    results.amount = amoutcheck(results.amount, results.amount_max, results.amount_min, tool_prot, v.name)
+                elseif ammo_prot and flagscheck(ammo_prot.flags) then
+                    results.amount = amoutcheck(results.amount, results.amount_max, results.amount_min, ammo_prot, v.name)
                 end
             elseif results.type == "fluid" then
                 local fluid = all_fluids[results.name]
@@ -143,4 +201,5 @@ for _, v in pairs(data.raw.recipe) do
             end
         end
     end
+    ::continue::  -- Continue label for the goto statement
 end
